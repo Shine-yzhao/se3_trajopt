@@ -20,6 +20,7 @@ import nltrajopt.params as pars
 VIS = pars.VIS
 DT = 0.1
 HOLD_TIME = 5.0
+PLAYBACK_SLOWDOWN = 3.0
 
 
 def set_base_rpy(q, rpy):
@@ -148,7 +149,8 @@ if VIS:
     time.sleep(1)
     while True:
         for i in range(len(qs)):
-            time.sleep(dts[i])
+            playback_dt = dts[i] * (PLAYBACK_SLOWDOWN if i < K - hold_steps else 1.0)
+            time.sleep(playback_dt)
             tvis.display_robot_q(robot, qs[i])
             tvis.update_forces(robot, forces[i], 0.01)
         tvis.update_forces(robot, {}, 0.01)
