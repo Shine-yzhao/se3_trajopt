@@ -1,7 +1,10 @@
 import time
+from pathlib import Path
 
 import numpy as np
 import pinocchio as pin
+import meshcat.geometry as g
+import meshcat.transformations as tf
 
 from nltrajopt.trajectory_optimization import NLTrajOpt
 from nltrajopt.contact_scheduler import ContactScheduler
@@ -26,6 +29,7 @@ PLATFORM_X_MIN = 0.5
 PLATFORM_X_MAX = 1.2
 PLATFORM_Y_MIN = -0.8
 PLATFORM_Y_MAX = 0.8
+PLATFORM_STL_PATH = Path(__file__).parent / "assets" / "front_platform.stl"
 
 
 def set_base_rpy(q, rpy):
@@ -41,6 +45,20 @@ def add_front_platform(terrain):
         for j, y in enumerate(y_range):
             if PLATFORM_X_MIN <= x <= PLATFORM_X_MAX and PLATFORM_Y_MIN <= y <= PLATFORM_Y_MAX:
                 terrain.grid[i, j] = PLATFORM_HEIGHT
+
+
+def load_platform_stl(tvis):
+    center_x = 0.5 * (PLATFORM_X_MIN + PLATFORM_X_MAX)
+    center_y = 0.5 * (PLATFORM_Y_MIN + PLATFORM_Y_MAX)
+    center_z = 0.5 * PLATFORM_HEIGHT
+    tvis.vis.viewer["terrain"].delete()
+    tvis.vis.viewer["terrain"]["front_platform"].set_object(
+        g.StlMeshGeometry.from_file(str(PLATFORM_STL_PATH)),
+        g.MeshLambertMaterial(color=0xDDDDDD),
+    )
+    tvis.vis.viewer["terrain"]["front_platform"].set_transform(
+        tf.translation_matrix([center_x, center_y, center_z])
+    )
 
 
 class BaseSymmetryCost:
@@ -265,7 +283,7 @@ forces = [result["nodes"][k]["forces"] for k in range(K)]
 if VIS:
     tvis = TrajoptVisualiser(robot)
     tvis.display_robot_q(robot, qs[0])
-    tvis.load_terrain(terrain)
+    load_platform_stl(tvis)
 
     time.sleep(1)
     while True:
