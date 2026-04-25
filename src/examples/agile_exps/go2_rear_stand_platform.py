@@ -113,6 +113,51 @@ class JointMirrorSymmetryCost:
         cost_grad[q_start + 11] -= weighted_res[5]
 
 
+class FramePlatformFrontClearanceConstraint:
+    def __init__(self, frame_names, max_x):
+        self.frame_names = frame_names
+        self.max_x = max_x
+
+    @property
+    def name(self):
+        return "frame_platform_front_clearance"
+
+    def init_constraint_ids(self, node):
+        prev_slice = node.c_extra_last_id
+        node.extra_constraint_ids[self.name] = {}
+        for frame_name in self.frame_names:
+            node.extra_constraint_ids[self.name][frame_name] = slice(prev_slice.stop, prev_slice.stop + 1)
+            prev_slice = node.extra_constraint_ids[self.name][frame_name]
+            node.c_dim += 1
+        node.c_extra_last_id = prev_slice
+
+    def compute_constraints(self, node_curr, node_next, state_vars, c, model, data):
+        q = reprutils.rep2pin(state_vars[node_curr.q_id])
+        pin.forwardKinematics(model, data, q)
+        pin.updateFramePlacements(model, data)
+        for frame_name in self.frame_names:
+            pos = data.oMf[model.getFrameId(frame_name)].translation
+            c[node_curr.extra_constraint_ids[self.name][frame_name]] = self.max_x - pos[0]
+
+    def compute_jacobians(self, node_curr, node_next, w, jac, model, data):
+        q = reprutils.rep2pin(w[node_curr.q_id])
+        pin.forwardKinematics(model, data, q)
+        pin.updateFramePlacements(model, data)
+        for frame_name in self.frame_names:
+            frame_id = model.getFrameId(frame_name)
+            J = pin.computeFrameJacobian(model, data, q, frame_id, pin.LOCAL_WORLD_ALIGNED)
+            J[:, :6] = J[:, :6] @ pin.Jexp6(w[node_curr.q_id][:6])
+            jac[node_curr.extra_constraint_ids[self.name][frame_name], node_curr.q_id] = -J[0, :]
+
+    def get_structure_ids(self, node_curr, node_next, row_ids, col_ids):
+        for frame_name in self.frame_names:
+            extend_ids_lists(row_ids, col_ids, node_curr.extra_constraint_ids[self.name][frame_name], node_curr.q_id)
+
+    def get_bounds(self, node, lb, ub, clb, cub, model):
+        for frame_name in self.frame_names:
+            cub[node.extra_constraint_ids[self.name][frame_name]] = [None]
+
+
 terrain = TerrainGrid(40, 40, 0.9, -1.0, -5.0, 5.0, 5.0)
 terrain.set_zero()
 add_front_platform(terrain)
@@ -161,6 +206,10 @@ for contact_phase_fnames in frame_contact_seq:
             SemiEulerIntegration(),
             TerrainGridContactConstraints(terrain),
             TerrainGridFrictionConstraints(terrain, max_delta_force=80.0),
+            FramePlatformFrontClearanceConstraint(
+                ["FL_calf_joint", "FR_calf_joint"],
+                max_x=PLATFORM_X_MIN - 0.03,
+            ),
         ]
     )
     stage_node.costs_list.extend(
