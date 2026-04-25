@@ -114,6 +114,28 @@ class JointMirrorSymmetryCost:
         cost_grad[q_start + 11] -= weighted_res[5]
 
 
+class ActiveConfigurationCost:
+    def __init__(self, ref, weight, active_from_k):
+        self.ref = ref.reshape(-1, 1)
+        self.Q = weight
+        self.active_from_k = active_from_k
+
+    def obj(self, opt_vect, node, next_node=None):
+        if node.k < self.active_from_k:
+            return 0.0
+        var = opt_vect[node.q_id.start + pars.SPACE_NQ : node.q_id.stop].reshape(-1, 1)
+        res = var - self.ref
+        return 0.5 * np.sum(res.T @ self.Q @ res)
+
+    def grad(self, opt_vect, cost_grad, node, next_node=None):
+        if node.k < self.active_from_k:
+            return
+        var = opt_vect[node.q_id.start + pars.SPACE_NQ : node.q_id.stop].reshape(-1, 1)
+        res = var - self.ref
+        jac = (res.T @ self.Q).reshape((-1,))
+        cost_grad[node.q_id.start + pars.SPACE_NQ : node.q_id.stop] += jac
+
+
 class FramePlatformFrontClearanceConstraint:
     def __init__(self, frame_names, max_x, min_z, active_from_k):
         self.frame_names = frame_names
@@ -322,6 +344,15 @@ qf[2] += PLATFORM_HEIGHT - np.mean(front_foot_heights)
 q_side = np.copy(qf)
 q_side[1] += RIGHT_STEP
 opti.set_target_pose(q_side)
+
+for node in opti.nodes:
+    node.costs_list.append(
+        ActiveConfigurationCost(
+            qf.copy()[7:],
+            np.eye(robot.model.nq - 7) * 1e-3,
+            active_from_k=platform_contact_start,
+        )
+    )
 
 swing_start = int((0.5 + 1.2) / DT)
 side_step_start = platform_contact_start
