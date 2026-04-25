@@ -18,7 +18,7 @@ import nltrajopt.params as pars
 
 
 VIS = pars.VIS
-DT = 0.05
+DT = 0.1
 
 
 def set_base_rpy(q, rpy):
@@ -41,10 +41,11 @@ contacts_dict = {
 contact_scheduler = ContactScheduler(robot.model, dt=DT, contact_frame_dict=contacts_dict)
 
 contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
-contact_scheduler.add_phase(["rear_feet"], 1.5)
+contact_scheduler.add_phase(["rear_feet"], 1.2)
 contact_scheduler.add_phase(["rear_feet"], 0.5)
 
 frame_contact_seq = contact_scheduler.contact_sequence_fnames
+print("K = ", len(frame_contact_seq))
 contact_frame_names = (
     robot.left_foot_frames
     + robot.right_foot_frames
@@ -83,18 +84,26 @@ opti = NLTrajOpt(model=robot.model, nodes=stages, dt=DT)
 
 opti.set_initial_pose(q0)
 
-qf = set_base_rpy(q0, [0.0, -0.5 * np.pi, 0.0])
+target_pitch = -1.4
+qf = set_base_rpy(q0, [0.0, target_pitch, 0.0])
+
+# Fold the rear legs under the body and tuck the front legs. This keeps the
+# center of mass close to the rear-foot support line for a static final pose.
+qf[8] = 1.4
+qf[9] = -2.2
+qf[11] = 1.4
+qf[12] = -2.2
+qf[14] = 2.25
+qf[15] = -2.03
+qf[17] = 2.25
+qf[18] = -2.03
+
 robot.fk_all(qf)
 rear_foot_heights = [
     robot.data.oMf[robot.model.getFrameId(frame)].translation[2]
     for frame in robot.left_foot_frames + robot.right_foot_frames
 ]
-rear_foot_x = [
-    robot.data.oMf[robot.model.getFrameId(frame)].translation[0]
-    for frame in robot.left_foot_frames + robot.right_foot_frames
-]
 qf[2] -= np.mean(rear_foot_heights)
-qf[0] -= np.mean(rear_foot_x)
 opti.set_target_pose(qf)
 
 for k, node in enumerate(opti.nodes):
@@ -102,7 +111,8 @@ for k, node in enumerate(opti.nodes):
     smooth = 3 * alpha**2 - 2 * alpha**3
     q_guess = np.copy(q0)
     q_guess[:3] = (1.0 - smooth) * q0[:3] + smooth * qf[:3]
-    opti.x0[node.q_id] = reprutils.rpy2rep(q_guess, [0.0, -0.5 * np.pi * smooth, 0.0])
+    q_guess[7:] = (1.0 - smooth) * q0[7:] + smooth * qf[7:]
+    opti.x0[node.q_id] = reprutils.rpy2rep(q_guess, [0.0, target_pitch * smooth, 0.0])
 
 result = opti.solve(200, 1e-3, parallel=False, print_level=0)
 opti.save_solution("go2_rear_stand")
