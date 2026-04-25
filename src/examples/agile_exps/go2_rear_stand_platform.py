@@ -115,9 +115,11 @@ class JointMirrorSymmetryCost:
 
 
 class FramePlatformFrontClearanceConstraint:
-    def __init__(self, frame_names, max_x):
+    def __init__(self, frame_names, max_x, min_z, active_from_k):
         self.frame_names = frame_names
         self.max_x = max_x
+        self.min_z = min_z
+        self.active_from_k = active_from_k
 
     @property
     def name(self):
@@ -127,20 +129,27 @@ class FramePlatformFrontClearanceConstraint:
         prev_slice = node.c_extra_last_id
         node.extra_constraint_ids[self.name] = {}
         for frame_name in self.frame_names:
-            node.extra_constraint_ids[self.name][frame_name] = slice(prev_slice.stop, prev_slice.stop + 1)
+            node.extra_constraint_ids[self.name][frame_name] = slice(prev_slice.stop, prev_slice.stop + 2)
             prev_slice = node.extra_constraint_ids[self.name][frame_name]
-            node.c_dim += 1
+            node.c_dim += 2
         node.c_extra_last_id = prev_slice
 
     def compute_constraints(self, node_curr, node_next, state_vars, c, model, data):
+        if node_curr.k < self.active_from_k:
+            return
+
         q = reprutils.rep2pin(state_vars[node_curr.q_id])
         pin.forwardKinematics(model, data, q)
         pin.updateFramePlacements(model, data)
         for frame_name in self.frame_names:
             pos = data.oMf[model.getFrameId(frame_name)].translation
-            c[node_curr.extra_constraint_ids[self.name][frame_name]] = self.max_x - pos[0]
+            c_ids = node_curr.extra_constraint_ids[self.name][frame_name]
+            c[c_ids] = [self.max_x - pos[0], pos[2] - self.min_z]
 
     def compute_jacobians(self, node_curr, node_next, w, jac, model, data):
+        if node_curr.k < self.active_from_k:
+            return
+
         q = reprutils.rep2pin(w[node_curr.q_id])
         pin.forwardKinematics(model, data, q)
         pin.updateFramePlacements(model, data)
@@ -148,7 +157,9 @@ class FramePlatformFrontClearanceConstraint:
             frame_id = model.getFrameId(frame_name)
             J = pin.computeFrameJacobian(model, data, q, frame_id, pin.LOCAL_WORLD_ALIGNED)
             J[:, :6] = J[:, :6] @ pin.Jexp6(w[node_curr.q_id][:6])
-            jac[node_curr.extra_constraint_ids[self.name][frame_name], node_curr.q_id] = -J[0, :]
+            c_ids = node_curr.extra_constraint_ids[self.name][frame_name]
+            jac[c_ids.start, node_curr.q_id] = -J[0, :]
+            jac[c_ids.start + 1, node_curr.q_id] = J[2, :]
 
     def get_structure_ids(self, node_curr, node_next, row_ids, col_ids):
         for frame_name in self.frame_names:
@@ -156,7 +167,12 @@ class FramePlatformFrontClearanceConstraint:
 
     def get_bounds(self, node, lb, ub, clb, cub, model):
         for frame_name in self.frame_names:
-            cub[node.extra_constraint_ids[self.name][frame_name]] = [None]
+            c_ids = node.extra_constraint_ids[self.name][frame_name]
+            if node.k < self.active_from_k:
+                clb[c_ids] = [0.0, 0.0]
+                cub[c_ids] = [0.0, 0.0]
+            else:
+                cub[c_ids] = [None, None]
 
 
 terrain = TerrainGrid(40, 40, 0.9, -1.0, -5.0, 5.0, 5.0)
@@ -189,6 +205,13 @@ contact_frame_names = (
     + robot.left_gripper_frames
     + robot.right_gripper_frames
 )
+platform_contact_start = next(
+    k
+    for k, contact_phase_fnames in enumerate(frame_contact_seq)
+    if k > 0
+    and robot.left_gripper_frames[0] in contact_phase_fnames
+    and robot.left_gripper_frames[0] not in frame_contact_seq[k - 1]
+)
 
 stages = []
 for contact_phase_fnames in frame_contact_seq:
@@ -210,6 +233,8 @@ for contact_phase_fnames in frame_contact_seq:
             FramePlatformFrontClearanceConstraint(
                 ["FL_calf_joint", "FR_calf_joint"],
                 max_x=PLATFORM_X_MIN - 0.03,
+                min_z=PLATFORM_HEIGHT,
+                active_from_k=platform_contact_start,
             ),
         ]
     )
@@ -228,7 +253,7 @@ opti = NLTrajOpt(model=robot.model, nodes=stages, dt=DT)
 opti.set_initial_pose(q0)
 
 stand_pitch = -1.4
-target_pitch = -1.1
+target_pitch = -1.15
 q_stand = set_base_rpy(q0, [0.0, stand_pitch, 0.0])
 qf = set_base_rpy(q0, [0.0, target_pitch, 0.0])
 
@@ -245,14 +270,14 @@ q_stand[18] = -2.033333333333333
 
 # Final posture: rear feet keep their original ground contact while both front
 # feet reach the nearby 0.5 m front terrain.
-qf[8] = 0.25
-qf[9] = -0.8476346482172143
-qf[11] = 0.25
-qf[12] = -0.8476346482172143
-qf[14] = 2.4
-qf[15] = -1.4
-qf[17] = 2.4
-qf[18] = -1.4
+qf[8] = 0.5
+qf[9] = -0.9104310393851263
+qf[11] = 0.5
+qf[12] = -0.9104310393851263
+qf[14] = 2.2
+qf[15] = -1.0
+qf[17] = 2.2
+qf[18] = -1.0
 
 robot.fk_all(q0)
 rear_foot_xy = np.mean(
