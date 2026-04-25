@@ -29,6 +29,58 @@ def set_base_rpy(q, rpy):
     return q_out
 
 
+class BaseSymmetryCost:
+    def __init__(self, weights):
+        self.ids = [1, 3, 5]  # lateral translation, roll, yaw in SE(3) tangent coordinates
+        self.weights = np.asarray(weights)
+
+    def obj(self, opt_vect, node, next_node=None):
+        values = opt_vect[node.q_id][self.ids]
+        return 0.5 * np.sum(self.weights * values**2)
+
+    def grad(self, opt_vect, cost_grad, node, next_node=None):
+        values = opt_vect[node.q_id][self.ids]
+        cost_grad[node.q_id.start + np.asarray(self.ids)] += self.weights * values
+
+
+class JointMirrorSymmetryCost:
+    def __init__(self, weights):
+        self.weights = np.asarray(weights)
+
+    def _residual(self, opt_vect, node):
+        qj = opt_vect[node.q_id][6:]
+        return np.array(
+            [
+                qj[0] + qj[3],
+                qj[1] - qj[4],
+                qj[2] - qj[5],
+                qj[6] + qj[9],
+                qj[7] - qj[10],
+                qj[8] - qj[11],
+            ]
+        )
+
+    def obj(self, opt_vect, node, next_node=None):
+        res = self._residual(opt_vect, node)
+        return 0.5 * np.sum(self.weights * res**2)
+
+    def grad(self, opt_vect, cost_grad, node, next_node=None):
+        weighted_res = self.weights * self._residual(opt_vect, node)
+        q_start = node.q_id.start + 6
+        cost_grad[q_start + 0] += weighted_res[0]
+        cost_grad[q_start + 3] += weighted_res[0]
+        cost_grad[q_start + 1] += weighted_res[1]
+        cost_grad[q_start + 4] -= weighted_res[1]
+        cost_grad[q_start + 2] += weighted_res[2]
+        cost_grad[q_start + 5] -= weighted_res[2]
+        cost_grad[q_start + 6] += weighted_res[3]
+        cost_grad[q_start + 9] += weighted_res[3]
+        cost_grad[q_start + 7] += weighted_res[4]
+        cost_grad[q_start + 10] -= weighted_res[4]
+        cost_grad[q_start + 8] += weighted_res[5]
+        cost_grad[q_start + 11] -= weighted_res[5]
+
+
 terrain = TerrainGrid(10, 10, 0.9, -1.0, -5.0, 5.0, 5.0)
 terrain.set_zero()
 
@@ -76,6 +128,8 @@ for contact_phase_fnames in frame_contact_seq:
     )
     stage_node.costs_list.extend(
         [
+            BaseSymmetryCost([1e-2, 1e-1, 1e-1]),
+            JointMirrorSymmetryCost([1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2]),
             ConfigurationCost(q0.copy()[7:], np.eye(robot.model.nq - 7) * 1e-6),
             JointAccelerationCost(np.zeros((robot.model.nv - 6,)), np.eye(robot.model.nv - 6) * 1e-7),
         ]
