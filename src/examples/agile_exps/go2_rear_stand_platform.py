@@ -263,7 +263,7 @@ for contact_phase_fnames in frame_contact_seq:
             dyn_const,
             TimeConstraint(min_dt=DT, max_dt=DT, total_time=None),
             SemiEulerIntegration(),
-            TerrainGridContactConstraints(terrain, skip_contact_velocity_after_k=platform_contact_start),
+            TerrainGridContactConstraints(terrain),
             TerrainGridFrictionConstraints(terrain, max_delta_force=80.0),
             FramePlatformFrontClearanceConstraint(
                 ["FL_calf_joint", "FR_calf_joint"],
