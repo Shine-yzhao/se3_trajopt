@@ -335,7 +335,7 @@ class NLTrajOpt:
         results = []
         for node in self.nodes:
             result = {
-                "dt": float(sol[node.dt_id]),
+                "dt": sol[node.dt_id].item(),
                 "q": reprutils.rep2pin(sol[node.q_id]),
                 "v": sol[node.vq_id],
                 "a": sol[node.aq_id],
