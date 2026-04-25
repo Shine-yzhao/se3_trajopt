@@ -21,8 +21,11 @@ VIS = pars.VIS
 DT = 0.1
 HOLD_TIME = 5.0
 PLAYBACK_SLOWDOWN = 3.0
-FRONT_TERRAIN_HEIGHT = 0.5
-FRONT_TERRAIN_X_MIN = 0.5
+PLATFORM_HEIGHT = 0.5
+PLATFORM_X_MIN = 0.5
+PLATFORM_X_MAX = 1.2
+PLATFORM_Y_MIN = -0.8
+PLATFORM_Y_MAX = 0.8
 
 
 def set_base_rpy(q, rpy):
@@ -31,11 +34,13 @@ def set_base_rpy(q, rpy):
     return q_out
 
 
-def set_front_terrain_height(terrain):
+def add_front_platform(terrain):
     x_range = np.linspace(terrain.min_x, terrain.max_x, terrain.rows)
+    y_range = np.linspace(terrain.min_y, terrain.max_y, terrain.cols)
     for i, x in enumerate(x_range):
-        if x >= FRONT_TERRAIN_X_MIN:
-            terrain.grid[i, :] = FRONT_TERRAIN_HEIGHT
+        for j, y in enumerate(y_range):
+            if PLATFORM_X_MIN <= x <= PLATFORM_X_MAX and PLATFORM_Y_MIN <= y <= PLATFORM_Y_MAX:
+                terrain.grid[i, j] = PLATFORM_HEIGHT
 
 
 class BaseSymmetryCost:
@@ -92,7 +97,7 @@ class JointMirrorSymmetryCost:
 
 terrain = TerrainGrid(40, 40, 0.9, -1.0, -5.0, 5.0, 5.0)
 terrain.set_zero()
-set_front_terrain_height(terrain)
+add_front_platform(terrain)
 
 robot = Go2()
 q0 = robot.go_neutral()
@@ -111,7 +116,8 @@ contact_scheduler.add_phase(["rear_feet", "front_feet"], 1.0)
 frame_contact_seq = contact_scheduler.contact_sequence_fnames
 print("K = ", len(frame_contact_seq))
 print(
-    f"Front terrain: height={FRONT_TERRAIN_HEIGHT}m for x >= {FRONT_TERRAIN_X_MIN}"
+    f"Front platform: height={PLATFORM_HEIGHT}m, "
+    f"x=[{PLATFORM_X_MIN}, {PLATFORM_X_MAX}], y=[{PLATFORM_Y_MIN}, {PLATFORM_Y_MAX}]"
 )
 contact_frame_names = (
     robot.left_foot_frames
@@ -206,7 +212,7 @@ front_foot_heights = [
     robot.data.oMf[robot.model.getFrameId(frame)].translation[2]
     for frame in robot.left_gripper_frames + robot.right_gripper_frames
 ]
-qf[2] += FRONT_TERRAIN_HEIGHT - np.mean(front_foot_heights)
+qf[2] += PLATFORM_HEIGHT - np.mean(front_foot_heights)
 opti.set_target_pose(qf)
 
 stand_end = int((0.5 + 1.2) / DT)
