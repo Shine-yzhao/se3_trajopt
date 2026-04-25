@@ -24,6 +24,7 @@ import nltrajopt.params as pars
 VIS = pars.VIS
 DT = 0.1
 PLAYBACK_SLOWDOWN = 3.0
+RIGHT_STEP = -0.1
 PLATFORM_HEIGHT = 0.5
 PLATFORM_X_MIN = 0.5
 PLATFORM_X_MAX = 1.2
@@ -184,6 +185,10 @@ q0 = robot.go_neutral()
 contacts_dict = {
     "rear_feet": robot.left_foot_frames + robot.right_foot_frames,
     "front_feet": robot.left_gripper_frames + robot.right_gripper_frames,
+    "RL": robot.left_foot_frames,
+    "RR": robot.right_foot_frames,
+    "FL": robot.left_gripper_frames,
+    "FR": robot.right_gripper_frames,
 }
 
 contact_scheduler = ContactScheduler(robot.model, dt=DT, contact_frame_dict=contacts_dict)
@@ -192,6 +197,14 @@ contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
 contact_scheduler.add_phase(["rear_feet"], 1.2)
 contact_scheduler.add_phase(["rear_feet"], 1.0)
 contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
+contact_scheduler.add_phase(["RL", "FL", "FR"], 0.3)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.1)
+contact_scheduler.add_phase(["RL", "RR", "FL"], 0.3)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.1)
+contact_scheduler.add_phase(["RL", "RR", "FR"], 0.3)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.1)
+contact_scheduler.add_phase(["RR", "FL", "FR"], 0.3)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.1)
 
 frame_contact_seq = contact_scheduler.contact_sequence_fnames
 print("K = ", len(frame_contact_seq))
@@ -228,7 +241,7 @@ for contact_phase_fnames in frame_contact_seq:
             dyn_const,
             TimeConstraint(min_dt=DT, max_dt=DT, total_time=None),
             SemiEulerIntegration(),
-            TerrainGridContactConstraints(terrain),
+            TerrainGridContactConstraints(terrain, skip_contact_velocity_after_k=platform_contact_start),
             TerrainGridFrictionConstraints(terrain, max_delta_force=80.0),
             FramePlatformFrontClearanceConstraint(
                 ["FL_calf_joint", "FR_calf_joint"],
@@ -306,25 +319,35 @@ front_foot_heights = [
     for frame in robot.left_gripper_frames + robot.right_gripper_frames
 ]
 qf[2] += PLATFORM_HEIGHT - np.mean(front_foot_heights)
-opti.set_target_pose(qf)
+q_side = np.copy(qf)
+q_side[1] += RIGHT_STEP
+opti.set_target_pose(q_side)
 
 swing_start = int((0.5 + 1.2) / DT)
+side_step_start = platform_contact_start
 for k, node in enumerate(opti.nodes):
     if k <= swing_start:
         alpha = k / swing_start
         q_start = q0
         q_goal = q_stand
         pitch = stand_pitch
-    else:
-        alpha = (k - swing_start) / (len(opti.nodes) - 1 - swing_start)
+        pitch_start = 0.0
+    elif k <= side_step_start:
+        alpha = (k - swing_start) / (side_step_start - swing_start)
         q_start = q_stand
         q_goal = qf
         pitch = target_pitch
+        pitch_start = stand_pitch
+    else:
+        alpha = (k - side_step_start) / (len(opti.nodes) - 1 - side_step_start)
+        q_start = qf
+        q_goal = q_side
+        pitch = target_pitch
+        pitch_start = target_pitch
     smooth = 3 * alpha**2 - 2 * alpha**3
     q_guess = np.copy(q0)
     q_guess[:3] = (1.0 - smooth) * q_start[:3] + smooth * q_goal[:3]
     q_guess[7:] = (1.0 - smooth) * q_start[7:] + smooth * q_goal[7:]
-    pitch_start = 0.0 if k <= swing_start else stand_pitch
     opti.x0[node.q_id] = reprutils.rpy2rep(
         q_guess,
         [0.0, (1.0 - smooth) * pitch_start + smooth * pitch, 0.0],

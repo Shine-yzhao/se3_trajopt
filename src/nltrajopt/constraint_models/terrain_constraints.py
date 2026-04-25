@@ -5,12 +5,13 @@ from terrain.terrain_grid import TerrainGrid
 class TerrainGridContactConstraints(AbstractConstraint):
     """Contact position and velocity constraints"""
 
-    def __init__(self, terrain):
+    def __init__(self, terrain, skip_contact_velocity_after_k=None):
         """
         Args:
             terrain: Terrain grid model of ground
         """
         self.terrain = terrain
+        self.skip_contact_velocity_after_k = skip_contact_velocity_after_k
 
     @property
     def name(self) -> str:
@@ -42,7 +43,14 @@ class TerrainGridContactConstraints(AbstractConstraint):
                 c[node_curr.c_z_ids[frame]] = ee_z - self.terrain.height(ee_x, ee_y)
 
                 # Velocity constraint: p_next - p_curr = 0 (if next node exists)
-                if node_next and frame in node_next.contact_phase_fnames:
+                if (
+                    node_next
+                    and frame in node_next.contact_phase_fnames
+                    and (
+                        self.skip_contact_velocity_after_k is None
+                        or node_curr.k < self.skip_contact_velocity_after_k
+                    )
+                ):
                     c[node_curr.c_vel_ids[frame]] = (
                         state_vars[node_next.contact_pos_ids[frame]] - state_vars[node_curr.contact_pos_ids[frame]]
                     )
@@ -85,7 +93,14 @@ class TerrainGridContactConstraints(AbstractConstraint):
                 ]
 
                 # Velocity constraint Jacobians
-                if node_next and frame in node_next.contact_phase_fnames:
+                if (
+                    node_next
+                    and frame in node_next.contact_phase_fnames
+                    and (
+                        self.skip_contact_velocity_after_k is None
+                        or node_curr.k < self.skip_contact_velocity_after_k
+                    )
+                ):
                     jac[node_curr.c_vel_ids[frame], node_next.contact_pos_ids[frame]] = np.eye(3)
                     jac[node_curr.c_vel_ids[frame], node_curr.contact_pos_ids[frame]] = -np.eye(3)
 
@@ -115,7 +130,14 @@ class TerrainGridContactConstraints(AbstractConstraint):
                     node_curr.c_z_ids[frame],
                     node_curr.contact_pos_ids[frame],
                 )
-                if node_next is not None and frame in node_next.contact_phase_fnames:
+                if (
+                    node_next is not None
+                    and frame in node_next.contact_phase_fnames
+                    and (
+                        self.skip_contact_velocity_after_k is None
+                        or node_curr.k < self.skip_contact_velocity_after_k
+                    )
+                ):
                     extend_ids_lists(
                         row_ids,
                         col_ids,
