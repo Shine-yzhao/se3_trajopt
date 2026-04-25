@@ -219,14 +219,14 @@ contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
 contact_scheduler.add_phase(["rear_feet"], 1.2)
 contact_scheduler.add_phase(["rear_feet"], 1.0)
 contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
-contact_scheduler.add_phase(["RL", "FL", "FR"], 0.3)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.1)
-contact_scheduler.add_phase(["RL", "RR", "FL"], 0.3)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.1)
-contact_scheduler.add_phase(["RL", "RR", "FR"], 0.3)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.1)
-contact_scheduler.add_phase(["RR", "FL", "FR"], 0.3)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.1)
+contact_scheduler.add_phase(["RL", "FL", "FR"], 0.4)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.2)
+contact_scheduler.add_phase(["RL", "RR", "FL"], 0.4)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.2)
+contact_scheduler.add_phase(["RL", "RR", "FR"], 0.4)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.2)
+contact_scheduler.add_phase(["RR", "FL", "FR"], 0.4)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.2)
 
 frame_contact_seq = contact_scheduler.contact_sequence_fnames
 print("K = ", len(frame_contact_seq))
@@ -264,7 +264,7 @@ for contact_phase_fnames in frame_contact_seq:
             TimeConstraint(min_dt=DT, max_dt=DT, total_time=None),
             SemiEulerIntegration(),
             TerrainGridContactConstraints(terrain),
-            TerrainGridFrictionConstraints(terrain, max_delta_force=80.0),
+            TerrainGridFrictionConstraints(terrain, max_delta_force=200.0),
             FramePlatformFrontClearanceConstraint(
                 ["FL_calf_joint", "FR_calf_joint"],
                 max_x=PLATFORM_X_MIN - 0.03,
@@ -384,7 +384,7 @@ for k, node in enumerate(opti.nodes):
         [0.0, (1.0 - smooth) * pitch_start + smooth * pitch, 0.0],
     )
 
-result = opti.solve(200, 1e-3, parallel=False, print_level=0)
+result = opti.solve(500, 1e-3, parallel=False, print_level=0)
 opti.save_solution("go2_rear_stand_platform")
 
 K = len(result["nodes"])
