@@ -349,7 +349,7 @@ for node in opti.nodes:
     node.costs_list.append(
         ActiveConfigurationCost(
             qf.copy()[7:],
-            np.eye(robot.model.nq - 7) * 1e-3,
+            np.eye(robot.model.nq - 7) * 1e-1,
             active_from_k=platform_contact_start,
         )
     )
