@@ -191,7 +191,8 @@ contact_scheduler = ContactScheduler(robot.model, dt=DT, contact_frame_dict=cont
 
 contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
 contact_scheduler.add_phase(["rear_feet"], 1.2)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 1.0)
+contact_scheduler.add_phase(["rear_feet"], 1.0)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
 
 frame_contact_seq = contact_scheduler.contact_sequence_fnames
 print("K = ", len(frame_contact_seq))
@@ -308,15 +309,15 @@ front_foot_heights = [
 qf[2] += PLATFORM_HEIGHT - np.mean(front_foot_heights)
 opti.set_target_pose(qf)
 
-stand_end = int((0.5 + 1.2) / DT)
+swing_start = int((0.5 + 1.2) / DT)
 for k, node in enumerate(opti.nodes):
-    if k <= stand_end:
-        alpha = k / stand_end
+    if k <= swing_start:
+        alpha = k / swing_start
         q_start = q0
         q_goal = q_stand
         pitch = stand_pitch
     else:
-        alpha = (k - stand_end) / (len(opti.nodes) - 1 - stand_end)
+        alpha = (k - swing_start) / (len(opti.nodes) - 1 - swing_start)
         q_start = q_stand
         q_goal = qf
         pitch = target_pitch
@@ -324,7 +325,7 @@ for k, node in enumerate(opti.nodes):
     q_guess = np.copy(q0)
     q_guess[:3] = (1.0 - smooth) * q_start[:3] + smooth * q_goal[:3]
     q_guess[7:] = (1.0 - smooth) * q_start[7:] + smooth * q_goal[7:]
-    pitch_start = 0.0 if k <= stand_end else stand_pitch
+    pitch_start = 0.0 if k <= swing_start else stand_pitch
     opti.x0[node.q_id] = reprutils.rpy2rep(
         q_guess,
         [0.0, (1.0 - smooth) * pitch_start + smooth * pitch, 0.0],
