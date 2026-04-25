@@ -10,6 +10,7 @@ from nltrajopt.trajectory_optimization import NLTrajOpt
 from nltrajopt.contact_scheduler import ContactScheduler
 from nltrajopt.node import Node
 from nltrajopt.constraint_models import *
+from nltrajopt.constraint_models.abstract_constraint import extend_ids_lists
 from nltrajopt.cost_models import *
 import nltrajopt.utils as reprutils
 
