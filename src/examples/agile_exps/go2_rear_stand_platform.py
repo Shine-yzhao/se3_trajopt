@@ -228,7 +228,7 @@ opti = NLTrajOpt(model=robot.model, nodes=stages, dt=DT)
 opti.set_initial_pose(q0)
 
 stand_pitch = -1.4
-target_pitch = -0.6
+target_pitch = -1.05
 q_stand = set_base_rpy(q0, [0.0, stand_pitch, 0.0])
 qf = set_base_rpy(q0, [0.0, target_pitch, 0.0])
 
@@ -245,14 +245,14 @@ q_stand[18] = -2.033333333333333
 
 # Final posture: rear feet keep their original ground contact while both front
 # feet reach the nearby 0.5 m front terrain.
-qf[8] = -0.5
-qf[9] = -1.67
-qf[11] = -0.5
-qf[12] = -1.67
-qf[14] = 2.264496275231389
-qf[15] = -2.033333333333333
-qf[17] = 2.264496275231389
-qf[18] = -2.033333333333333
+qf[8] = 1.0
+qf[9] = -0.85
+qf[11] = 1.0
+qf[12] = -0.85
+qf[14] = 3.0
+qf[15] = -1.1
+qf[17] = 3.0
+qf[18] = -1.1
 
 robot.fk_all(q0)
 rear_foot_xy = np.mean(
