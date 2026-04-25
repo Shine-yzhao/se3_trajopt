@@ -7,3 +7,5 @@ meshcat-env
 *.txt
 **trajopt_solutions**
 .conda/
+.tools/
+.micromamba/
