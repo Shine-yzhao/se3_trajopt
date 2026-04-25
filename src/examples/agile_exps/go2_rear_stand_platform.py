@@ -23,7 +23,6 @@ import nltrajopt.params as pars
 
 VIS = pars.VIS
 DT = 0.1
-HOLD_TIME = 5.0
 PLAYBACK_SLOWDOWN = 3.0
 PLATFORM_HEIGHT = 0.5
 PLATFORM_X_MIN = 0.5
@@ -332,23 +331,6 @@ for k, node in enumerate(opti.nodes):
     )
 
 result = opti.solve(200, 1e-3, parallel=False, print_level=0)
-
-hold_steps = int(round(HOLD_TIME / DT))
-hold_node = result["nodes"][-1]
-for _ in range(hold_steps):
-    result["nodes"].append(
-        {
-            "dt": DT,
-            "q": hold_node["q"].copy(),
-            "v": np.zeros_like(hold_node["v"]),
-            "a": np.zeros_like(hold_node["a"]),
-            "forces": {frame: force.copy() for frame, force in hold_node["forces"].items()},
-            "contact_positions": {
-                frame: pos.copy() for frame, pos in hold_node["contact_positions"].items()
-            },
-        }
-    )
-opti.sol_dict["nodes"] = result["nodes"]
 opti.save_solution("go2_rear_stand_platform")
 
 K = len(result["nodes"])
@@ -364,7 +346,7 @@ if VIS:
     time.sleep(1)
     while True:
         for i in range(len(qs)):
-            playback_dt = dts[i] * (PLAYBACK_SLOWDOWN if i < K - hold_steps else 1.0)
+            playback_dt = dts[i] * PLAYBACK_SLOWDOWN
             time.sleep(playback_dt)
             tvis.display_robot_q(robot, qs[i])
             tvis.update_forces(robot, forces[i], 0.01)
