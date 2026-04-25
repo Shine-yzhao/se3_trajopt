@@ -22,8 +22,8 @@ DT = 0.1
 HOLD_TIME = 5.0
 PLAYBACK_SLOWDOWN = 3.0
 PLATFORM_HEIGHT = 0.5
-PLATFORM_X_MIN = 0.8
-PLATFORM_X_MAX = 2.0
+PLATFORM_X_MIN = 0.25
+PLATFORM_X_MAX = 1.1
 PLATFORM_Y_MIN = -0.8
 PLATFORM_Y_MAX = 0.8
 
@@ -111,7 +111,7 @@ contact_scheduler = ContactScheduler(robot.model, dt=DT, contact_frame_dict=cont
 
 contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
 contact_scheduler.add_phase(["rear_feet"], 1.2)
-contact_scheduler.add_phase(["rear_feet"], 0.5)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], 1.0)
 
 frame_contact_seq = contact_scheduler.contact_sequence_fnames
 print("K = ", len(frame_contact_seq))
@@ -159,35 +159,83 @@ opti = NLTrajOpt(model=robot.model, nodes=stages, dt=DT)
 
 opti.set_initial_pose(q0)
 
-target_pitch = -1.4
+stand_pitch = -1.4
+target_pitch = -1.0
+q_stand = set_base_rpy(q0, [0.0, stand_pitch, 0.0])
 qf = set_base_rpy(q0, [0.0, target_pitch, 0.0])
 
 # Fold the rear legs under the body and tuck the front legs. This keeps the
 # center of mass close to the rear-foot support line for a static final pose.
-qf[8] = 1.4
-qf[9] = -2.2
-qf[11] = 1.4
-qf[12] = -2.2
-qf[14] = 2.264496275231389
-qf[15] = -2.033333333333333
-qf[17] = 2.264496275231389
-qf[18] = -2.033333333333333
+q_stand[8] = 1.4
+q_stand[9] = -2.2
+q_stand[11] = 1.4
+q_stand[12] = -2.2
+q_stand[14] = 2.264496275231389
+q_stand[15] = -2.033333333333333
+q_stand[17] = 2.264496275231389
+q_stand[18] = -2.033333333333333
+
+# Final posture: rear feet keep their original ground contact while both front
+# feet reach the nearby 0.5 m platform.
+qf[8] = 0.25
+qf[9] = -2.08
+qf[11] = 0.25
+qf[12] = -2.08
+qf[14] = 2.8
+qf[15] = -2.4
+qf[17] = 2.8
+qf[18] = -2.4
+
+robot.fk_all(q0)
+rear_foot_xy = np.mean(
+    [
+        robot.data.oMf[robot.model.getFrameId(frame)].translation[:2]
+        for frame in robot.left_foot_frames + robot.right_foot_frames
+    ],
+    axis=0,
+)
+for q in (q_stand, qf):
+    robot.fk_all(q)
+    rear_foot_pos = np.mean(
+        [
+            robot.data.oMf[robot.model.getFrameId(frame)].translation
+            for frame in robot.left_foot_frames + robot.right_foot_frames
+        ],
+        axis=0,
+    )
+    q[0] += rear_foot_xy[0] - rear_foot_pos[0]
+    q[1] += rear_foot_xy[1] - rear_foot_pos[1]
+    q[2] -= rear_foot_pos[2]
 
 robot.fk_all(qf)
-rear_foot_heights = [
+front_foot_heights = [
     robot.data.oMf[robot.model.getFrameId(frame)].translation[2]
-    for frame in robot.left_foot_frames + robot.right_foot_frames
+    for frame in robot.left_gripper_frames + robot.right_gripper_frames
 ]
-qf[2] -= np.mean(rear_foot_heights)
+qf[2] += PLATFORM_HEIGHT - np.mean(front_foot_heights)
 opti.set_target_pose(qf)
 
+stand_end = int((0.5 + 1.2) / DT)
 for k, node in enumerate(opti.nodes):
-    alpha = k / (len(opti.nodes) - 1)
+    if k <= stand_end:
+        alpha = k / stand_end
+        q_start = q0
+        q_goal = q_stand
+        pitch = stand_pitch
+    else:
+        alpha = (k - stand_end) / (len(opti.nodes) - 1 - stand_end)
+        q_start = q_stand
+        q_goal = qf
+        pitch = target_pitch
     smooth = 3 * alpha**2 - 2 * alpha**3
     q_guess = np.copy(q0)
-    q_guess[:3] = (1.0 - smooth) * q0[:3] + smooth * qf[:3]
-    q_guess[7:] = (1.0 - smooth) * q0[7:] + smooth * qf[7:]
-    opti.x0[node.q_id] = reprutils.rpy2rep(q_guess, [0.0, target_pitch * smooth, 0.0])
+    q_guess[:3] = (1.0 - smooth) * q_start[:3] + smooth * q_goal[:3]
+    q_guess[7:] = (1.0 - smooth) * q_start[7:] + smooth * q_goal[7:]
+    pitch_start = 0.0 if k <= stand_end else stand_pitch
+    opti.x0[node.q_id] = reprutils.rpy2rep(
+        q_guess,
+        [0.0, (1.0 - smooth) * pitch_start + smooth * pitch, 0.0],
+    )
 
 result = opti.solve(200, 1e-3, parallel=False, print_level=0)
 
