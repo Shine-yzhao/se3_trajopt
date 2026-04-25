@@ -22,8 +22,8 @@ DT = 0.1
 HOLD_TIME = 5.0
 PLAYBACK_SLOWDOWN = 3.0
 PLATFORM_HEIGHT = 0.5
-PLATFORM_X_MIN = 0.25
-PLATFORM_X_MAX = 1.1
+PLATFORM_X_MIN = 0.5
+PLATFORM_X_MAX = 1.2
 PLATFORM_Y_MIN = -0.8
 PLATFORM_Y_MAX = 0.8
 
@@ -95,7 +95,7 @@ class JointMirrorSymmetryCost:
         cost_grad[q_start + 11] -= weighted_res[5]
 
 
-terrain = TerrainGrid(10, 10, 0.9, -1.0, -5.0, 5.0, 5.0)
+terrain = TerrainGrid(40, 40, 0.9, -1.0, -5.0, 5.0, 5.0)
 terrain.set_zero()
 add_front_platform(terrain)
 
@@ -160,7 +160,7 @@ opti = NLTrajOpt(model=robot.model, nodes=stages, dt=DT)
 opti.set_initial_pose(q0)
 
 stand_pitch = -1.4
-target_pitch = -1.0
+target_pitch = -0.6
 q_stand = set_base_rpy(q0, [0.0, stand_pitch, 0.0])
 qf = set_base_rpy(q0, [0.0, target_pitch, 0.0])
 
@@ -177,14 +177,14 @@ q_stand[18] = -2.033333333333333
 
 # Final posture: rear feet keep their original ground contact while both front
 # feet reach the nearby 0.5 m platform.
-qf[8] = 0.25
-qf[9] = -2.08
-qf[11] = 0.25
-qf[12] = -2.08
-qf[14] = 2.8
-qf[15] = -2.4
-qf[17] = 2.8
-qf[18] = -2.4
+qf[8] = -0.5
+qf[9] = -1.67
+qf[11] = -0.5
+qf[12] = -1.67
+qf[14] = 2.264496275231389
+qf[15] = -2.033333333333333
+qf[17] = 2.264496275231389
+qf[18] = -2.033333333333333
 
 robot.fk_all(q0)
 rear_foot_xy = np.mean(
