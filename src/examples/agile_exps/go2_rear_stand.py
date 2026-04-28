@@ -81,11 +81,12 @@ class JointMirrorSymmetryCost:
         cost_grad[q_start + 11] -= weighted_res[5]
 
 
-terrain = TerrainGrid(10, 10, 0.9, -1.0, -5.0, 5.0, 5.0)
+terrain = TerrainGrid(10, 10, 0.9, -1.0, -5.0, 5.0, 5.0) # rows, cols, mu, min_x, min_y, max_x, max_y
 terrain.set_zero()
 
 robot = Go2()
 q0 = robot.go_neutral()
+print("q0 = ", q0)
 
 contacts_dict = {
     "rear_feet": robot.left_foot_frames + robot.right_foot_frames,
@@ -170,7 +171,7 @@ for k, node in enumerate(opti.nodes):
     q_guess[7:] = (1.0 - smooth) * q0[7:] + smooth * qf[7:]
     opti.x0[node.q_id] = reprutils.rpy2rep(q_guess, [0.0, target_pitch * smooth, 0.0])
 
-result = opti.solve(200, 1e-3, parallel=False, print_level=0)
+result = opti.solve(200, 1e-3, parallel=False, print_level=5)
 
 hold_steps = int(round(HOLD_TIME / DT))
 hold_node = result["nodes"][-1]

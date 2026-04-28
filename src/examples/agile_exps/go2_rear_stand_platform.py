@@ -24,13 +24,36 @@ import nltrajopt.params as pars
 VIS = pars.VIS
 DT = 0.1
 PLAYBACK_SLOWDOWN = 3.0
-RIGHT_STEP = -0.1
+
+# Terrain / platform geometry.
 PLATFORM_HEIGHT = 0.5
 PLATFORM_X_MIN = 0.5
 PLATFORM_X_MAX = 1.2
 PLATFORM_Y_MIN = -0.8
 PLATFORM_Y_MAX = 0.8
 PLATFORM_STL_PATH = Path(__file__).parent / "assets" / "front_platform.stl"
+
+# Contact phase timing (seconds).
+DOUBLE_SUPPORT_START = 0.5
+REAR_ONLY_LIFT = 0.5
+DOUBLE_SUPPORT_END = 0.5
+
+# Base orientation targets (radians).
+STAND_PITCH = -1.3
+TARGET_PITCH = -1.15
+
+# Cost weights.
+BASE_SYMMETRY_WEIGHTS = [1e-2, 1e-1, 1e-1]
+JOINT_MIRROR_WEIGHTS = [1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2]
+Q_REG_WEIGHT = 1e-6
+QDD_REG_WEIGHT = 1e-7
+ACTIVE_Q_WEIGHT = 1e-1
+
+# Swing shaping / contact approach tuning.
+FRONT_REACH_RATIO = 0.85
+STAND_BLEND_RATIO = 0.6
+FRONT_FOOT_SWING_MAX_CLEARANCE = 0.12
+PRE_CONTACT_WARMUP_NODES = 2
 
 
 def set_base_rpy(q, rpy):
@@ -60,6 +83,34 @@ def load_platform_stl(tvis):
     tvis.vis.viewer["terrain"]["front_platform"].set_transform(
         tf.translation_matrix([center_x, center_y, center_z])
     )
+
+
+def find_contact_transition(frame_contact_seq, probe_frame, to_contact):
+    return next(
+        k
+        for k, contact_phase_fnames in enumerate(frame_contact_seq)
+        if k > 0
+        and ((probe_frame in contact_phase_fnames) == to_contact)
+        and ((probe_frame in frame_contact_seq[k - 1]) != to_contact)
+    )
+
+
+def mean_frame_translation(robot, frame_names, q, dim=None):
+    robot.fk_all(q)
+    values = [
+        robot.data.oMf[robot.model.getFrameId(frame)].translation
+        for frame in frame_names
+    ]
+    mean_val = np.mean(values, axis=0)
+    return mean_val if dim is None else mean_val[:dim]
+
+
+def align_pose_to_rear_support(robot, q_ref_xy, q):
+    rear_frames = robot.left_foot_frames + robot.right_foot_frames
+    rear_foot_pos = mean_frame_translation(robot, rear_frames, q)
+    q[0] += q_ref_xy[0] - rear_foot_pos[0]
+    q[1] += q_ref_xy[1] - rear_foot_pos[1]
+    q[2] -= rear_foot_pos[2]
 
 
 class BaseSymmetryCost:
@@ -197,6 +248,67 @@ class FramePlatformFrontClearanceConstraint:
                 cub[c_ids] = [None, None]
 
 
+class FrameHeightUpperBoundConstraint:
+    def __init__(self, frame_names, max_z, active_from_k, active_until_k):
+        self.frame_names = frame_names
+        self.max_z = max_z
+        self.active_from_k = active_from_k
+        self.active_until_k = active_until_k
+
+    @property
+    def name(self):
+        return "frame_height_upper_bound"
+
+    def _is_active(self, k):
+        return self.active_from_k <= k < self.active_until_k
+
+    def init_constraint_ids(self, node):
+        prev_slice = node.c_extra_last_id
+        node.extra_constraint_ids[self.name] = {}
+        for frame_name in self.frame_names:
+            node.extra_constraint_ids[self.name][frame_name] = slice(prev_slice.stop, prev_slice.stop + 1)
+            prev_slice = node.extra_constraint_ids[self.name][frame_name]
+            node.c_dim += 1
+        node.c_extra_last_id = prev_slice
+
+    def compute_constraints(self, node_curr, node_next, state_vars, c, model, data):
+        if not self._is_active(node_curr.k):
+            return
+        q = reprutils.rep2pin(state_vars[node_curr.q_id])
+        pin.forwardKinematics(model, data, q)
+        pin.updateFramePlacements(model, data)
+        for frame_name in self.frame_names:
+            pos = data.oMf[model.getFrameId(frame_name)].translation
+            c_ids = node_curr.extra_constraint_ids[self.name][frame_name]
+            c[c_ids] = [self.max_z - pos[2]]
+
+    def compute_jacobians(self, node_curr, node_next, w, jac, model, data):
+        if not self._is_active(node_curr.k):
+            return
+        q = reprutils.rep2pin(w[node_curr.q_id])
+        pin.forwardKinematics(model, data, q)
+        pin.updateFramePlacements(model, data)
+        for frame_name in self.frame_names:
+            frame_id = model.getFrameId(frame_name)
+            J = pin.computeFrameJacobian(model, data, q, frame_id, pin.LOCAL_WORLD_ALIGNED)
+            J[:, :6] = J[:, :6] @ pin.Jexp6(w[node_curr.q_id][:6])
+            c_ids = node_curr.extra_constraint_ids[self.name][frame_name]
+            jac[c_ids.start, node_curr.q_id] = -J[2, :]
+
+    def get_structure_ids(self, node_curr, node_next, row_ids, col_ids):
+        for frame_name in self.frame_names:
+            extend_ids_lists(row_ids, col_ids, node_curr.extra_constraint_ids[self.name][frame_name], node_curr.q_id)
+
+    def get_bounds(self, node, lb, ub, clb, cub, model):
+        for frame_name in self.frame_names:
+            c_ids = node.extra_constraint_ids[self.name][frame_name]
+            if not self._is_active(node.k):
+                clb[c_ids] = [0.0]
+                cub[c_ids] = [0.0]
+            else:
+                cub[c_ids] = [None]
+
+
 terrain = TerrainGrid(40, 40, 0.9, -1.0, -5.0, 5.0, 5.0)
 terrain.set_zero()
 add_front_platform(terrain)
@@ -215,18 +327,9 @@ contacts_dict = {
 
 contact_scheduler = ContactScheduler(robot.model, dt=DT, contact_frame_dict=contacts_dict)
 
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
-contact_scheduler.add_phase(["rear_feet"], 1.2)
-contact_scheduler.add_phase(["rear_feet"], 1.0)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.5)
-contact_scheduler.add_phase(["RL", "FL", "FR"], 0.4)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.2)
-contact_scheduler.add_phase(["RL", "RR", "FL"], 0.4)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.2)
-contact_scheduler.add_phase(["RL", "RR", "FR"], 0.4)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.2)
-contact_scheduler.add_phase(["RR", "FL", "FR"], 0.4)
-contact_scheduler.add_phase(["rear_feet", "front_feet"], 0.2)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], DOUBLE_SUPPORT_START)
+contact_scheduler.add_phase(["rear_feet"], REAR_ONLY_LIFT)
+contact_scheduler.add_phase(["rear_feet", "front_feet"], DOUBLE_SUPPORT_END)
 
 frame_contact_seq = contact_scheduler.contact_sequence_fnames
 print("K = ", len(frame_contact_seq))
@@ -240,12 +343,12 @@ contact_frame_names = (
     + robot.left_gripper_frames
     + robot.right_gripper_frames
 )
-platform_contact_start = next(
-    k
-    for k, contact_phase_fnames in enumerate(frame_contact_seq)
-    if k > 0
-    and robot.left_gripper_frames[0] in contact_phase_fnames
-    and robot.left_gripper_frames[0] not in frame_contact_seq[k - 1]
+probe_front_frame = robot.left_gripper_frames[0]
+platform_contact_start = find_contact_transition(
+    frame_contact_seq, probe_front_frame, to_contact=True
+)
+front_liftoff_start = find_contact_transition(
+    frame_contact_seq, probe_front_frame, to_contact=False
 )
 
 stages = []
@@ -269,16 +372,25 @@ for contact_phase_fnames in frame_contact_seq:
                 ["FL_calf_joint", "FR_calf_joint"],
                 max_x=PLATFORM_X_MIN - 0.03,
                 min_z=PLATFORM_HEIGHT,
-                active_from_k=platform_contact_start,
+                active_from_k=max(0, platform_contact_start - PRE_CONTACT_WARMUP_NODES),
+            ),
+            FrameHeightUpperBoundConstraint(
+                robot.left_gripper_frames + robot.right_gripper_frames,
+                max_z=PLATFORM_HEIGHT + FRONT_FOOT_SWING_MAX_CLEARANCE,
+                active_from_k=front_liftoff_start,
+                active_until_k=platform_contact_start,
             ),
         ]
     )
     stage_node.costs_list.extend(
         [
-            BaseSymmetryCost([1e-2, 1e-1, 1e-1]),
-            JointMirrorSymmetryCost([1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2]),
-            ConfigurationCost(q0.copy()[7:], np.eye(robot.model.nq - 7) * 1e-6),
-            JointAccelerationCost(np.zeros((robot.model.nv - 6,)), np.eye(robot.model.nv - 6) * 1e-7),
+            BaseSymmetryCost(BASE_SYMMETRY_WEIGHTS),
+            JointMirrorSymmetryCost(JOINT_MIRROR_WEIGHTS),
+            ConfigurationCost(q0.copy()[7:], np.eye(robot.model.nq - 7) * Q_REG_WEIGHT),
+            JointAccelerationCost(
+                np.zeros((robot.model.nv - 6,)),
+                np.eye(robot.model.nv - 6) * QDD_REG_WEIGHT,
+            ),
         ]
     )
     stages.append(stage_node)
@@ -287,10 +399,8 @@ opti = NLTrajOpt(model=robot.model, nodes=stages, dt=DT)
 
 opti.set_initial_pose(q0)
 
-stand_pitch = -1.4
-target_pitch = -1.15
-q_stand = set_base_rpy(q0, [0.0, stand_pitch, 0.0])
-qf = set_base_rpy(q0, [0.0, target_pitch, 0.0])
+q_stand = set_base_rpy(q0, [0.0, STAND_PITCH, 0.0])
+qf = set_base_rpy(q0, [0.0, TARGET_PITCH, 0.0])
 
 # Fold the rear legs under the body and tuck the front legs. This keeps the
 # center of mass close to the rear-foot support line for a static final pose.
@@ -314,68 +424,58 @@ qf[15] = -1.0
 qf[17] = 2.2
 qf[18] = -1.0
 
-robot.fk_all(q0)
-rear_foot_xy = np.mean(
-    [
-        robot.data.oMf[robot.model.getFrameId(frame)].translation[:2]
-        for frame in robot.left_foot_frames + robot.right_foot_frames
-    ],
-    axis=0,
+# Make the stand waypoint a short transitional posture instead of a long
+# vertical hold, so the front legs can approach the platform earlier.
+q_stand[7:] = (1.0 - STAND_BLEND_RATIO) * q_stand[7:] + STAND_BLEND_RATIO * qf[7:]
+
+# Keep front-feet swing low and close to the final contact posture to avoid
+# lifting too high and "slapping" onto the platform.
+for idx in [14, 15, 17, 18]:
+    q_stand[idx] = (1.0 - FRONT_REACH_RATIO) * q_stand[idx] + FRONT_REACH_RATIO * qf[idx]
+
+rear_foot_xy = mean_frame_translation(
+    robot,
+    robot.left_foot_frames + robot.right_foot_frames,
+    q0,
+    dim=2,
 )
 for q in (q_stand, qf):
-    robot.fk_all(q)
-    rear_foot_pos = np.mean(
-        [
-            robot.data.oMf[robot.model.getFrameId(frame)].translation
-            for frame in robot.left_foot_frames + robot.right_foot_frames
-        ],
-        axis=0,
-    )
-    q[0] += rear_foot_xy[0] - rear_foot_pos[0]
-    q[1] += rear_foot_xy[1] - rear_foot_pos[1]
-    q[2] -= rear_foot_pos[2]
+    align_pose_to_rear_support(robot, rear_foot_xy, q)
 
-robot.fk_all(qf)
-front_foot_heights = [
-    robot.data.oMf[robot.model.getFrameId(frame)].translation[2]
-    for frame in robot.left_gripper_frames + robot.right_gripper_frames
-]
-qf[2] += PLATFORM_HEIGHT - np.mean(front_foot_heights)
-q_side = np.copy(qf)
-q_side[1] += RIGHT_STEP
-opti.set_target_pose(q_side)
+front_foot_mean_z = mean_frame_translation(
+    robot,
+    robot.left_gripper_frames + robot.right_gripper_frames,
+    qf,
+)[2]
+qf[2] += PLATFORM_HEIGHT - front_foot_mean_z
+opti.set_target_pose(qf)
 
 for node in opti.nodes:
     node.costs_list.append(
         ActiveConfigurationCost(
             qf.copy()[7:],
-            np.eye(robot.model.nq - 7) * 1e-1,
-            active_from_k=platform_contact_start,
+            np.eye(robot.model.nq - 7) * ACTIVE_Q_WEIGHT,
+            active_from_k=max(0, platform_contact_start - PRE_CONTACT_WARMUP_NODES),
         )
     )
 
-swing_start = int((0.5 + 1.2) / DT)
-side_step_start = platform_contact_start
+swing_start = int((DOUBLE_SUPPORT_START + 0.2) / DT)
 for k, node in enumerate(opti.nodes):
     if k <= swing_start:
         alpha = k / swing_start
         q_start = q0
         q_goal = q_stand
-        pitch = stand_pitch
+        pitch = STAND_PITCH
         pitch_start = 0.0
-    elif k <= side_step_start:
-        alpha = (k - swing_start) / (side_step_start - swing_start)
+    else:
+        transition_steps = max(1, platform_contact_start - swing_start)
+        alpha = min(1.0, (k - swing_start) / transition_steps)
         q_start = q_stand
         q_goal = qf
-        pitch = target_pitch
-        pitch_start = stand_pitch
-    else:
-        alpha = (k - side_step_start) / (len(opti.nodes) - 1 - side_step_start)
-        q_start = qf
-        q_goal = q_side
-        pitch = target_pitch
-        pitch_start = target_pitch
-    smooth = 3 * alpha**2 - 2 * alpha**3
+        pitch = TARGET_PITCH
+        pitch_start = STAND_PITCH
+    # Use smootherstep to reduce approach velocity near the contact transition.
+    smooth = 6 * alpha**5 - 15 * alpha**4 + 10 * alpha**3
     q_guess = np.copy(q0)
     q_guess[:3] = (1.0 - smooth) * q_start[:3] + smooth * q_goal[:3]
     q_guess[7:] = (1.0 - smooth) * q_start[7:] + smooth * q_goal[7:]
@@ -384,7 +484,7 @@ for k, node in enumerate(opti.nodes):
         [0.0, (1.0 - smooth) * pitch_start + smooth * pitch, 0.0],
     )
 
-result = opti.solve(500, 1e-3, parallel=False, print_level=0)
+result = opti.solve(500, 1e-3, parallel=False, print_level=5)
 opti.save_solution("go2_rear_stand_platform")
 
 K = len(result["nodes"])

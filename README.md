@@ -64,8 +64,8 @@ If you use this code in a scientific publication, please use the following citat
 We recommend using [Conda](https://docs.conda.io/) for managing dependencies.
 
 #### Create and activate the environment
-- `conda create -p ./.conda/ python=3.13`
-- `conda activate ./.conda`
+- `conda create -n se3_opt python=3.13`
+- `conda activate se3_opt`
 
 #### Install dependencies
 Use `conda install conda-forge::"package_name"` to install the following packages:
@@ -77,8 +77,8 @@ Use `conda install conda-forge::"package_name"` to install the following package
 
 ### Usage
 
-- `conda activate .conda`
-- `export PYTHONPATH=$(pwd)/src`
+- `conda activate se3_opt`
+- `pip install -e .`
 - `python src/examples/talos_trajopt.py --vis`
 
 use `--vis` option to visualize the results with meshcat
