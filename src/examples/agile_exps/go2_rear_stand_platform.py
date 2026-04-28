@@ -1,4 +1,5 @@
 import time
+import math
 from pathlib import Path
 
 import numpy as np
@@ -54,6 +55,7 @@ FRONT_REACH_RATIO = 0.85
 STAND_BLEND_RATIO = 0.6
 FRONT_FOOT_SWING_MAX_CLEARANCE = 0.12
 PRE_CONTACT_WARMUP_NODES = 2
+PLOT_TORQUES = True
 
 
 def set_base_rpy(q, rpy):
@@ -111,6 +113,78 @@ def align_pose_to_rear_support(robot, q_ref_xy, q):
     q[0] += q_ref_xy[0] - rear_foot_pos[0]
     q[1] += q_ref_xy[1] - rear_foot_pos[1]
     q[2] -= rear_foot_pos[2]
+
+
+def get_actuated_joint_names(model):
+    # Pinocchio joint list starts with universe and free-flyer root.
+    return model.names[2:]
+
+
+def compute_joint_torques(robot, result_nodes, frame_contact_seq):
+    model = robot.model
+    data = model.createData()
+    torques = []
+    for k, node_result in enumerate(result_nodes):
+        q = node_result["q"]
+        v = node_result.get("v", np.zeros(model.nv))
+        a = node_result.get("a", np.zeros(model.nv))
+        fext = [pin.Force.Zero() for _ in range(model.njoints)]
+
+        contact_phase_fnames = frame_contact_seq[min(k, len(frame_contact_seq) - 1)]
+        for frame_name in contact_phase_fnames:
+            if frame_name not in node_result["forces"]:
+                continue
+            frame_id = model.getFrameId(frame_name)
+            frame_data = model.frames[frame_id]
+            joint_id = frame_data.parentJoint
+            jMf = frame_data.placement
+            f_world = pin.Force(np.asarray(node_result["forces"][frame_name]), np.zeros(3))
+            fext[joint_id] += jMf.act(f_world)
+
+        tau = pin.rnea(model, data, q, v, a, fext)
+        torques.append(tau[6:].copy())
+    return np.asarray(torques)
+
+
+def plot_joint_torques(dts, torques, joint_names, front_liftoff_start, platform_contact_start):
+    try:
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib 未安装，跳过关节力矩曲线绘制。")
+        return
+    mpl.rcParams["figure.raise_window"] = False
+
+    t = np.cumsum(np.hstack(([0.0], np.asarray(dts[:-1]))))
+    n_joints = torques.shape[1]
+    ncols = 3
+    nrows = math.ceil(n_joints / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(15, 3.2 * nrows), sharex=True)
+    axes = np.asarray(axes).reshape(-1)
+
+    for j in range(n_joints):
+        ax = axes[j]
+        ax.plot(t, torques[:, j], linewidth=1.6)
+        if 0 <= front_liftoff_start < len(t):
+            ax.axvline(t[front_liftoff_start], color="tab:orange", linestyle="--", linewidth=1.0)
+        if 0 <= platform_contact_start < len(t):
+            ax.axvline(t[platform_contact_start], color="tab:green", linestyle="--", linewidth=1.0)
+        ax.set_title(joint_names[j], fontsize=9)
+        ax.grid(alpha=0.25)
+        ax.set_ylabel("tau [Nm]")
+
+    for j in range(n_joints, len(axes)):
+        axes[j].axis("off")
+
+    axes[min(n_joints - 1, len(axes) - 1)].set_xlabel("time [s]")
+    fig.suptitle("Go2 rear-stand-to-platform joint torques", fontsize=12)
+    plt.tight_layout()
+    plt.ion()
+    fig.canvas.draw()
+    fig.canvas.flush_events()
+    plt.show(block=False)
+    plt.pause(0.1)
+    return plt
 
 
 class BaseSymmetryCost:
@@ -492,6 +566,19 @@ dts = [result["nodes"][k]["dt"] for k in range(K)]
 qs = [result["nodes"][k]["q"] for k in range(K)]
 forces = [result["nodes"][k]["forces"] for k in range(K)]
 
+if PLOT_TORQUES:
+    joint_names = get_actuated_joint_names(robot.model)
+    torques = compute_joint_torques(robot, result["nodes"], frame_contact_seq)
+    torque_plotter = plot_joint_torques(
+        dts,
+        torques,
+        joint_names,
+        front_liftoff_start=front_liftoff_start,
+        platform_contact_start=platform_contact_start,
+    )
+else:
+    torque_plotter = None
+
 if VIS:
     tvis = TrajoptVisualiser(robot)
     tvis.display_robot_q(robot, qs[0])
@@ -500,6 +587,8 @@ if VIS:
     time.sleep(1)
     while True:
         for i in range(len(qs)):
+            if torque_plotter is not None:
+                torque_plotter.pause(0.001)
             playback_dt = dts[i] * PLAYBACK_SLOWDOWN
             time.sleep(playback_dt)
             tvis.display_robot_q(robot, qs[i])
