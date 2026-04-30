@@ -23,6 +23,7 @@ class Node:
         self.aq_id = None
         self.forces_ids: Dict[str, slice] = {}
         self.contact_pos_ids: Dict[str, slice] = {}
+        self.extra_constraint_ids: Dict[str, Dict[str, slice]] = {}
 
     def init_node_ids(self, v_id, c_id, k):
         self.k = k
@@ -38,6 +39,7 @@ class Node:
         self._init_dynamics_constraints(c_id)
         self._init_contact_constraints()
         self._init_foot_constraints()
+        self._init_extra_constraints()
 
     def _init_state_variables(self, v_id: int) -> None:
         """Initialize state variable slices."""
@@ -120,3 +122,14 @@ class Node:
                 self.c_vel_ids[fname] = slice(prev_slice.stop, prev_slice.stop + vel_dim)
                 prev_slice = copy(self.c_vel_ids[fname])
                 self.c_dim += vel_dim
+
+    def _init_extra_constraints(self) -> None:
+        """Allow example-specific constraints to reserve rows."""
+        self.c_extra_last_id = self.c_vel_ids.get(
+            self.contact_fnames[-1],
+            self.c_z_ids[self.contact_fnames[-1]],
+        )
+        for constraint in self.constraints_list:
+            init_constraint_ids = getattr(constraint, "init_constraint_ids", None)
+            if init_constraint_ids is not None:
+                init_constraint_ids(self)

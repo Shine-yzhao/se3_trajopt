@@ -1,3 +1,14 @@
+Metadata-Version: 2.4
+Name: se3-trajopt
+Version: 0.1.0
+Summary: Whole-body trajectory optimization in the SE(3) tangent space
+Author: SE3 TrajOpt Maintainers
+License: MIT
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Dynamic: license-file
+
 # Whole-Body Trajectory Optimization in the SE(3) Tangent Space
 
 ## Overview
@@ -64,8 +75,8 @@ If you use this code in a scientific publication, please use the following citat
 We recommend using [Conda](https://docs.conda.io/) for managing dependencies.
 
 #### Create and activate the environment
-- `conda create -n se3_opt python=3.13`
-- `conda activate se3_opt`
+- `conda create -p ./.conda/ python=3.13`
+- `conda activate ./.conda`
 
 #### Install dependencies
 Use `conda install conda-forge::"package_name"` to install the following packages:
@@ -77,7 +88,7 @@ Use `conda install conda-forge::"package_name"` to install the following package
 
 ### Usage
 
-- `conda activate se3_opt`
+- `conda activate .conda`
 - `pip install -e .`
 - `python src/examples/talos_trajopt.py --vis`
 
